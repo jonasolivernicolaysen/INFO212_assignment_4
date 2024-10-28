@@ -1,60 +1,76 @@
 from flask import Blueprint, jsonify, request
+from .db import db
 
 employees_bp = Blueprint("employees", __name__)
 
-employees = [
-    {"id": 1, "name": "Jonas", "address": "adressenr", "branch": "harkjedunomed"},
-    {"id": 2, "name": "Ponas", "address": "adressenr", "branch": "harkjeduhellenomed"}
-]
-
 @employees_bp.route("/", methods=["GET"])
 def get_employees():
-    return jsonify(employees)
+    query = "MATCH (e:Employee) RETURN e"
+    result = db.query(query)
+    employees = [record["e"]._properties for record in result]
+    return jsonify(employees), 200
 
 
 @employees_bp.route("/", methods=["POST"])
-def create_employees():
+def create_employee():
     data = request.get_json()
     
     if not all(field in data for field in ["name", "address", "branch"]):
-        return jsonify({"message": "missing required fields"})
+        return jsonify({"message": "missing required fields"}), 400
 
-    new_employee = {
-        "id": employees[-1]["id"] + 1 if employees else 1,
+    query = """
+    CREATE (e:Employee {id: $id, name: $name, address: $address, branch: $branch})
+    RETURN e
+    """
+
+    employee_id = len(db.query("MATCH (e:Employee) RETURN e")) + 1
+
+    parameters = {
+        "id": employee_id,
         "name": data["name"],
-        "age": data["age"],
-        "address": data["address"]
+        "address": data["address"],
+        "branch": data["branch"]
     }
 
-    employees.append(new_employee)
-
-    return jsonify(new_employee)
+    result = db.query(query, parameters)
+    new_employee = result[0]["e"]._properties
+    return jsonify(new_employee), 201
 
 
 @employees_bp.route("/<int:employee_id>", methods=["PUT"])
-def update_employees(employee_id):
+def update_employee(employee_id):
     data = request.get_json()
     
-    employee = next((employee for employee in employees if employee["id"] == employee_id), None)
+    employee_query = "MATCH (e:Employee {id: $id}) RETURN e"
+    employee_result = db.query(employee_query, {"id": employee_id})
+    if not employee_result:
+        return jsonify({"message": "employee not found"}), 404
 
-    if employee is None:
-        return jsonify({"message", "employee not found"})
+    update_query = """
+    MATCH (e:Employee {id: $id})
+    SET e.name = $name, e.address = $address, e.branch = $branch
+    RETURN e
+    """
 
-    employee["name"] = data.get("name", employee["name"])
-    employee["address"] = data.get("address", employee["address"])
-    employee["branch"] = data.get("branch", employee["branch"])
+    parameters = {
+        "id": employee_id,
+        "name": data.get("name", employee_result[0]["e"]["name"]),
+        "address": data.get("address", employee_result[0]["e"]["address"]),
+        "branch": data.get("branch", employee_result[0]["e"]["branch"])
+    }
 
-    return jsonify(employees)
+    result = db.query(update_query, parameters)
+    updated_employee = result[0]["e"]._properties
+    return jsonify(updated_employee), 200
 
 
 @employees_bp.route("/<int:employee_id>", methods=["DELETE"])
-def delete_employees(employee_id):
-    employee = next((employee for employee in employees if employee["id"] == employee_id), None)
-
-    if employee == None:
-        return jsonify({"message": "employee not found"})
-
-    employees.remove(employee)
-
-    return jsonify(employees)
-
+def delete_employee(employee_id):    
+    employee_query = "MATCH (e:Employee {id: $id}) RETURN e"
+    employee_result = db.query(employee_query, {"id": employee_id})
+    if not employee_result:
+        return jsonify({"message": "employee not found"}), 404
+    
+    delete_query = "MATCH (e:Employee {id: $id}) DELETE e"
+    db.query(delete_query, {"id": employee_id})
+    return jsonify({"message": "employee deleted"}), 200

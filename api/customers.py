@@ -1,59 +1,76 @@
 from flask import Blueprint, jsonify, request
+from .db import db
 
 customers_bp = Blueprint("customers", __name__)
 
-customers = [
-    {"id": 1, "name": "Jonas", "age": "21", "address": "harkjedunomed"},
-    {"id": 2, "name": "Ponas", "age": "21", "address": "harkjeduhellenomed"}
-]
-
 @customers_bp.route("/", methods=["GET"])
 def get_customers():
-    return jsonify(customers)
+    query = "MATCH (c:Customer) RETURN c"
+    result = db.query(query)
+    customers = [record["c"]._properties for record in result]
+    return jsonify(customers), 200
 
 
 @customers_bp.route("/", methods=["POST"])
-def create_customers():
+def create_customer():
     data = request.get_json()
     
     if not all(field in data for field in ["name", "age", "address"]):
-        return jsonify({"message": "missing required fields"})
+        return jsonify({"message": "missing required fields"}), 400
 
-    new_customer = {
-        "id": customers[-1]["id"] + 1 if customers else 1,
+    query = """
+    CREATE (c:Customer {id: $id, name: $name, age: $age, address: $address})
+    RETURN c
+    """
+
+    customer_id = len(db.query("MATCH (c:Customer) RETURN c")) + 1
+
+    parameters = {
+        "id": customer_id,
         "name": data["name"],
         "age": data["age"],
         "address": data["address"]
     }
 
-    customers.append(new_customer)
-
-    return jsonify(new_customer)
+    result = db.query(query, parameters)
+    new_customer = result[0]["c"]._properties
+    return jsonify(new_customer), 201
 
 
 @customers_bp.route("/<int:customer_id>", methods=["PUT"])
-def update_customers(customer_id):
+def update_customer(customer_id):
     data = request.get_json()
     
-    customer = next((customer for customer in customers if customer["id"] == customer_id), None)
+    customer_query = "MATCH (c:Customer {id: $id}) RETURN c"
+    customer_result = db.query(customer_query, {"id": customer_id})
+    if not customer_result:
+        return jsonify({"message": "customer not found"}), 404
 
-    if customer is None:
-        return jsonify({"message", "customer not found"})
+    update_query = """
+    MATCH (c:Customer {id: $id})
+    SET c.name = $name, c.age = $age, c.address = $address
+    RETURN c
+    """
 
-    customer["name"] = data.get("name", customer["name"])
-    customer["age"] = data.get("age", customer["age"])
-    customer["address"] = data.get("address", customer["address"])
-    return jsonify(customers)
+    parameters = {
+        "id": customer_id,
+        "name": data.get("name", customer_result[0]["c"]["name"]),
+        "age": data.get("age", customer_result[0]["c"]["age"]),
+        "address": data.get("address", customer_result[0]["c"]["address"])
+    }
+
+    result = db.query(update_query, parameters)
+    updated_customer = result[0]["c"]._properties
+    return jsonify(updated_customer), 200
 
 
 @customers_bp.route("/<int:customer_id>", methods=["DELETE"])
-def delete_customers(customer_id):
-    customer = next((customer for customer in customers if customer["id"] == customer_id), None)
-
-    if customer == None:
-        return jsonify({"message": "customer not found"})
-
-    customers.remove(customer)
-
-    return jsonify(customers)
-
+def delete_customer(customer_id):    
+    customer_query = "MATCH (c:Customer {id: $id}) RETURN c"
+    customer_result = db.query(customer_query, {"id": customer_id})
+    if not customer_result:
+        return jsonify({"message": "customer not found"}), 404
+    
+    delete_query = "MATCH (c:Customer {id: $id}) DELETE c"
+    db.query(delete_query, {"id": customer_id})
+    return jsonify({"message": "customer deleted"}), 200
