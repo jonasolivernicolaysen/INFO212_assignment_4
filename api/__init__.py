@@ -1,8 +1,11 @@
 from flask import Flask
+from config import Config
+from .db import init_app
 
 def create_app():
     app = Flask(__name__)
-    app.config['SECRET_KEY'] = 'your_secret_key'
+    app.config.from_object(Config)
+    init_app(app)
 
     from .cars import cars_bp
     from .customers import customers_bp
